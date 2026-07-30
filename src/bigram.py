@@ -39,7 +39,7 @@ decode = lambda l: ''.join(itoc[i] for i in l)  # decoder: list of ints -> strin
 data = torch.tensor(encode(text), dtype=torch.long)
 n = int(PERCENT_TRAIN*len(data))
 train_data = data[:n]
-val_data = data[:n]     # Ensures that we don't overfit
+val_data = data[n:]     # Ensures that we don't overfit
 
 # Never feed entire text into transformer bc computation limits
 # Work with chunks of dataset (bits of the text)
@@ -102,7 +102,7 @@ for b in range(BATCH_SIZE):
         target = yb[b, t]
         print(f"when input is '{decode(context.tolist())}' the target is '{decode([target.tolist()])}'")
 
-bigram_lm = BigramLanguageModel(vocab_size, N_EMBED)
+bigram_lm = BigramLanguageModel(vocab_size, BLOCK_SIZE, N_EMBED, DEVICE)
 bigram_lm = bigram_lm.to(DEVICE)
 logits, loss = bigram_lm(xb, yb) # Passing inputs and targets
 print(logits.shape)
