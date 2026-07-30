@@ -16,6 +16,7 @@ EVAL_INTERVAL: int = 500
 LEARNING_RATE: float = 1e-2
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 EVAL_ITERS: int = 200
+N_EMBED: int = 32    # Number of embedding dimensions
 
 # Read the text
 with open("data/input.txt", 'r', encoding='utf-8') as f:
@@ -101,7 +102,7 @@ for b in range(BATCH_SIZE):
         target = yb[b, t]
         print(f"when input is '{decode(context.tolist())}' the target is '{decode([target.tolist()])}'")
 
-bigram_lm = BigramLanguageModel(vocab_size)
+bigram_lm = BigramLanguageModel(vocab_size, N_EMBED)
 bigram_lm = bigram_lm.to(DEVICE)
 logits, loss = bigram_lm(xb, yb) # Passing inputs and targets
 print(logits.shape)

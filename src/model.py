@@ -8,15 +8,19 @@ torch.manual_seed(TORCH_SEED)
 
 class BigramLanguageModel(nn.Module):
 
-    def __init__(self, vocab_size):
+    def __init__(self, vocab_size, n_embed):
         super().__init__()
 
         # Each token directly readds of the lgits for next token from a lookup table
-        self.token_embedding_table = nn.Embedding(vocab_size, vocab_size)
+        self.token_embedding_table = nn.Embedding(vocab_size, n_embed)
+
+        # Need linear layer to go from token-embeddings to logits
+        self.lm_head = nn.Linear(n_embed, vocab_size)
 
     def forward(self, idx, targets = None):
         # idx and targets are both (B, T) tensor of integers
-        logits = self.token_embedding_table(idx)    # (Batch, Time, Channel)
+        tokens_embed = self.token_embedding_table(idx)    # (Batch, Time, n_embed)
+        logits = self.lm_head(tokens_embed) # <B, T, vocab_size>
 
         # This is for some particular shape
         if targets is None:
