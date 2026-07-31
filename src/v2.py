@@ -69,6 +69,23 @@ class FeedForward(nn.Module):
         return self.net(x)
 
 
+class Block(nn.Module):
+    """ transformer block: communication followed by computation """
+
+    def __init__(self, n_embed, n_head):
+        # n_embed: embedding dimension
+        # n_head: number of heads we'd like
+        super().__init__()
+        head_size = n_embed // n_head
+        self.sa = MultiHeadAttention(n_head, head_size) # communication
+        self.ffwd = FeedForward(n_embed)    
+
+    def forward(self, x):
+        x = self.sa(x)      # communication
+        x = self.ffwd(x)    # computation
+        return x
+
+
 class BigramLanguageModel(nn.Module):
 
     def __init__(self):
@@ -78,8 +95,11 @@ class BigramLanguageModel(nn.Module):
         # Want to encode the position of the tokens as well, not just the identity
         self.position_embedding_table = nn.Embedding(BLOCK_SIZE, N_EMBED)
 
-        self.sa_heads = MultiHeadAttention(4, N_EMBED//4)   # 4 heads of 8-dimensional self-attn
-        self.ffwd = FeedForward(N_EMBED)
+        self.blocks = nn.Sequential(
+            Block(N_EMBED, n_head=4),
+            Block(N_EMBED, n_head=4),
+            Block(N_EMBED, n_head=4),
+        )
         # Need linear layer to go from token-embeddings to logits
         self.lm_head = nn.Linear(N_EMBED, vocab_size)
 
@@ -91,8 +111,7 @@ class BigramLanguageModel(nn.Module):
         position_embed = self.position_embedding_table(torch.arange(T, device=DEVICE)) # <T, C>
 
         x = tokens_embed + position_embed   # <B, T, C>, holds both the token identities and positions at which tokens occur
-        x = self.sa_heads(x)    # Apply one head of self-attention <B, T, C>
-        x = self.ffwd(x)    # <B, T, C>, giving time for network to 'think on' what they found from other tokens
+        x = self.blocks(x)  # <B, T, C>
         logits = self.lm_head(x) # <B, T, vocab_size>
 
         # This is for some particular shape
