@@ -10,7 +10,7 @@ TORCH_SEED = 1337
 PERCENT_TRAIN: float = 0.9 # 1 - PERCENT_TRAIN > 0.0
 BATCH_SIZE: int = 32 # How many independent sequences will we process in parallel
 BLOCK_SIZE: int = 8 # Maximum context length for predictions?
-MAX_ITERS: int = 10000
+MAX_ITERS: int = 5000
 EVAL_INTERVAL: int = 500
 LEARNING_RATE: float = 1e-3
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -44,6 +44,17 @@ class Head(nn.Module):
         return out
 
 
+class MultiHeadAttention(nn.Module):
+    """multiple heads of self-attention in parallel"""
+
+    def __init__(self, num_heads, head_size):
+        super().__init__()
+        self.heads = nn.ModuleList([Head(head_size) for _ in range(num_heads)])
+
+    def forward(self, x):
+        return torch.cat([h(x) for h in self.heads], dim=-1) # concat over channel dimension
+
+
 class BigramLanguageModel(nn.Module):
 
     def __init__(self):
@@ -53,7 +64,7 @@ class BigramLanguageModel(nn.Module):
         # Want to encode the position of the tokens as well, not just the identity
         self.position_embedding_table = nn.Embedding(BLOCK_SIZE, N_EMBED)
 
-        self.sa_head = Head(N_EMBED)
+        self.sa_heads = MultiHeadAttention(4, N_EMBED//4)   # 4 heads of 8-dimensional self-attn
         # Need linear layer to go from token-embeddings to logits
         self.lm_head = nn.Linear(N_EMBED, vocab_size)
 
@@ -65,7 +76,7 @@ class BigramLanguageModel(nn.Module):
         position_embed = self.position_embedding_table(torch.arange(T, device=DEVICE)) # <T, C>
 
         x = tokens_embed + position_embed   # <B, T, C>, holds both the token identities and positions at which tokens occur
-        x = self.sa_head(x)    # Apply one head of self-attention <B, T, C>
+        x = self.sa_heads(x)    # Apply one head of self-attention <B, T, C>
         logits = self.lm_head(x) # <B, T, vocab_size>
 
         # This is for some particular shape
