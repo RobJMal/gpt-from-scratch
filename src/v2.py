@@ -83,11 +83,13 @@ class Block(nn.Module):
         head_size = n_embed // n_head
         self.sa = MultiHeadAttention(n_head, head_size) # communication
         self.ffwd = FeedForward(n_embed)    
+        self.ln1 = nn.LayerNorm(n_embed)
+        self.ln2 = nn.LayerNorm(n_embed)
 
     def forward(self, x):
         # The plus part is the residual connections
-        x = x + self.sa(x)      # communication
-        x = x + self.ffwd(x)    # computation
+        x = x + self.sa(self.ln1(x))      # communication
+        x = x + self.ffwd(self.ln2(x))    # computation
         return x
 
 
@@ -104,6 +106,7 @@ class BigramLanguageModel(nn.Module):
             Block(N_EMBED, n_head=4),
             Block(N_EMBED, n_head=4),
             Block(N_EMBED, n_head=4),
+            nn.LayerNorm(N_EMBED),
         )
         # Need linear layer to go from token-embeddings to logits
         self.lm_head = nn.Linear(N_EMBED, vocab_size)
