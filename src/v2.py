@@ -5,9 +5,6 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
-# Custom
-from model import BigramLanguageModel
-
 # ---- Hyperparams ----
 TORCH_SEED = 1337
 PERCENT_TRAIN: float = 0.9 # 1 - PERCENT_TRAIN > 0.0
@@ -15,7 +12,7 @@ BATCH_SIZE: int = 32 # How many independent sequences will we process in paralle
 BLOCK_SIZE: int = 8 # Maximum context length for predictions?
 MAX_ITERS: int = 10000
 EVAL_INTERVAL: int = 500
-LEARNING_RATE: float = 1e-2
+LEARNING_RATE: float = 1e-3
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 EVAL_ITERS: int = 200
 N_EMBED: int = 32    # Number of embedding dimensions
@@ -45,6 +42,69 @@ class Head(nn.Module):
         v = self.value(x)   # <B, T, C>
         out = wei @ v   # <B, T, T> @ <B, T, C> --> <B, T, C>
         return out
+
+
+class BigramLanguageModel(nn.Module):
+
+    def __init__(self):
+        super().__init__()
+        # Each token directly reads of the logits for next token from a lookup table
+        self.token_embedding_table = nn.Embedding(vocab_size, N_EMBED)
+        # Want to encode the position of the tokens as well, not just the identity
+        self.position_embedding_table = nn.Embedding(BLOCK_SIZE, N_EMBED)
+
+        self.sa_head = Head(N_EMBED)
+        # Need linear layer to go from token-embeddings to logits
+        self.lm_head = nn.Linear(N_EMBED, vocab_size)
+
+    def forward(self, idx, targets = None):
+        B, T = idx.shape 
+
+        # idx and targets are both (B, T) tensor of integers
+        tokens_embed = self.token_embedding_table(idx)    # (Batch, Time, n_embed)
+        position_embed = self.position_embedding_table(torch.arange(T, device=DEVICE)) # <T, C>
+
+        x = tokens_embed + position_embed   # <B, T, C>, holds both the token identities and positions at which tokens occur
+        x = self.sa_head(x)    # Apply one head of self-attention <B, T, C>
+        logits = self.lm_head(x) # <B, T, vocab_size>
+
+        # This is for some particular shape
+        if targets is None:
+            loss = None
+        else: 
+            B, T, C = logits.shape
+            logits = logits.view(B*T, C)
+            targets = targets.view(B*T)
+
+            # Pytorch cross_entropy wants (B,C,T)
+            loss = F.cross_entropy(logits, targets) # -log likelihood of cross and targets
+
+        # Scores for next character in the sequence 
+        return logits, loss
+
+    def generate(self, idx, max_new_tokens):
+        # idx is (B, T) array of indices in the current context
+        for _ in range(max_new_tokens):
+            # Crop context idx to last block_size tokens so we don't go out of bounds
+            # This is because we're using positional embeddings
+            idx_cond = idx[:, -BLOCK_SIZE:]
+
+            # get the predictions
+            logits, loss = self(idx_cond)
+
+            # focus on last time step
+            logits = logits[:, -1, :]   # Becomes (B, C)
+
+            # apply softmax to get probabilities
+            probs = F.softmax(logits, dim=-1)   # (B, C)
+
+            # sample from distribution, just 1 sample
+            idx_next = torch.multinomial(probs, num_samples=1)  # (B, 1)
+
+            # append sampled indx to the running sequence
+            idx = torch.cat((idx, idx_next), dim=1) # (B, T+1)
+
+        return idx
 
 
 # Read the text
@@ -131,7 +191,7 @@ for b in range(BATCH_SIZE):
         target = yb[b, t]
         print(f"when input is '{decode(context.tolist())}' the target is '{decode([target.tolist()])}'")
 
-bigram_lm = BigramLanguageModel(vocab_size, BLOCK_SIZE, N_EMBED, DEVICE)
+bigram_lm = BigramLanguageModel()
 bigram_lm = bigram_lm.to(DEVICE)
 logits, loss = bigram_lm(xb, yb) # Passing inputs and targets
 print(logits.shape)
