@@ -9,13 +9,16 @@ from torch.nn import functional as F
 TORCH_SEED = 1337
 PERCENT_TRAIN: float = 0.9 # 1 - PERCENT_TRAIN > 0.0
 BATCH_SIZE: int = 32 # How many independent sequences will we process in parallel
-BLOCK_SIZE: int = 8 # Maximum context length for predictions?
+BLOCK_SIZE: int = 128 # Maximum context length for predictions?
 MAX_ITERS: int = 5000
 EVAL_INTERVAL: int = 500
-LEARNING_RATE: float = 1e-3
+LEARNING_RATE: float = 3e-4
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 EVAL_ITERS: int = 200
-N_EMBED: int = 32    # Number of embedding dimensions
+N_EMBED: int = 128    # Number of embedding dimensions
+N_HEAD: int = 4
+N_LAYER: int = 4
+DROPOUT: float = 0.2
 
 
 class Head(nn.Module):
@@ -29,6 +32,7 @@ class Head(nn.Module):
 
         # This creates the register buffer
         self.register_buffer('tril', torch.tril(torch.ones(BLOCK_SIZE, BLOCK_SIZE)))
+        self.dropout = nn.Dropout(DROPOUT)
 
     def forward(self, x):
         B, T, C = x.shape
@@ -38,6 +42,7 @@ class Head(nn.Module):
         wei = q @ k.transpose(-2, -1) * C**-0.5     # <B, T, C> @ <B, C, T> --> <B, T, T>
         wei = wei.masked_fill(self.tril[:T, :T] == 0, float('-inf'))    # <B, T, T>
         wei = F.softmax(wei, dim=-1)    # <B, T, T>
+        wei = self.dropout(wei)
         # perform weighted aggregation of the values
         v = self.value(x)   # <B, T, C>
         out = wei @ v   # <B, T, T> @ <B, T, C> --> <B, T, C>
@@ -51,10 +56,11 @@ class MultiHeadAttention(nn.Module):
         super().__init__()
         self.heads = nn.ModuleList([Head(head_size) for _ in range(num_heads)])
         self.proj = nn.Linear(N_EMBED, N_EMBED)
+        self.dropout = nn.Dropout(DROPOUT)
 
     def forward(self, x):
         out = torch.cat([h(x) for h in self.heads], dim=-1) # concat over channel dimension
-        out = self.proj(out)    # linear transformation of outcome of heads
+        out = self.dropout(self.proj(out))    # linear transformation of outcome of heads
         return out
 
 
@@ -67,6 +73,7 @@ class FeedForward(nn.Module):
             nn.Linear(n_embed, 4 * n_embed),
             nn.ReLU(),
             nn.Linear(4 * n_embed, n_embed),    # projection layer
+            nn.Dropout(DROPOUT),
         )
 
     def forward(self, x):
@@ -102,12 +109,8 @@ class BigramLanguageModel(nn.Module):
         # Want to encode the position of the tokens as well, not just the identity
         self.position_embedding_table = nn.Embedding(BLOCK_SIZE, N_EMBED)
 
-        self.blocks = nn.Sequential(
-            Block(N_EMBED, n_head=4),
-            Block(N_EMBED, n_head=4),
-            Block(N_EMBED, n_head=4),
-            nn.LayerNorm(N_EMBED),
-        )
+        self.blocks = nn.Sequential(*[Block(N_EMBED, N_HEAD) for _ in range(N_LAYER)])
+        self.ln_f = nn.LayerNorm(N_EMBED)
         # Need linear layer to go from token-embeddings to logits
         self.lm_head = nn.Linear(N_EMBED, vocab_size)
 
@@ -120,6 +123,7 @@ class BigramLanguageModel(nn.Module):
 
         x = tokens_embed + position_embed   # <B, T, C>, holds both the token identities and positions at which tokens occur
         x = self.blocks(x)  # <B, T, C>
+        x = self.ln_f(x)    # <B, T, C>
         logits = self.lm_head(x) # <B, T, vocab_size>
 
         # This is for some particular shape
